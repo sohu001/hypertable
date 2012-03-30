@@ -104,8 +104,8 @@ void Range::initialize() {
   /**
    * Determine split side
    */
-  if (m_metalog_entity->state.state == RangeState::SPLIT_LOG_INSTALLED ||
-      m_metalog_entity->state.state == RangeState::SPLIT_SHRUNK) {
+  if (m_metalog_entity->state.state == RangeState::SPLIT_LOG_INSTALLED  ||
+      m_metalog_entity->state.state == RangeState::SPLIT_SHRUNK ) {
     int cmp = strcmp(m_metalog_entity->state.split_point, m_metalog_entity->state.old_boundary_row);
     if (cmp < 0)
       m_split_off_high = true;
@@ -529,6 +529,7 @@ void Range::relinquish() {
 
   try {
     switch (m_metalog_entity->state.state) {
+    // XXX: SJ I AM HERE DONT WE NEED A BREAK HERE??
     case (RangeState::STEADY):
       relinquish_install_log();
     case (RangeState::RELINQUISH_LOG_INSTALLED):
@@ -790,11 +791,11 @@ void Range::split_install_log() {
   }
   sort(split_rows.begin(), split_rows.end());
 
-  //HT_INFO_OUT << "thelma Dumping split rows for range " << m_name << HT_END;
+  //HT_INFO_OUT << "[bibble]Dumping split rows for range " << m_name << HT_END;
   //for (size_t i=0; i<split_rows.size(); i++)
-  //  HT_INFO_OUT << "thelma Range::get_split_row [" << i << "] = " << split_rows[i]
+  //  HT_INFO_OUT << "[bibble]Range::get_split_row [" << i << "] = " << split_rows[i]
   //              << HT_END;
-  //HT_INFO_OUT << "thelma Done calculating split rows for range " << m_name << HT_END;
+  //HT_INFO_OUT << "[bibble]Done calculating split rows for range " << m_name << HT_END;
 
   /**
    * If we still didn't get a good split row, try again the *really* hard way
@@ -1254,6 +1255,7 @@ void Range::compact(MaintenanceFlag::Map &subtask_map) {
     m_capacity_exceeded_throttle = false;
     m_maintenance_generation++;
   }
+  //HT_DEBUG_OUT << "Compaction complete for range " << m_name << HT_END;
 }
 
 
@@ -1296,8 +1298,10 @@ void Range::purge_memory(MaintenanceFlag::Map &subtask_map) {
  */
 void Range::recovery_finalize() {
 
-  if (m_metalog_entity->state.state == RangeState::SPLIT_LOG_INSTALLED ||
-      m_metalog_entity->state.state == RangeState::RELINQUISH_LOG_INSTALLED) {
+  if ((m_metalog_entity->state.state & RangeState::SPLIT_LOG_INSTALLED) 
+          == RangeState::SPLIT_LOG_INSTALLED ||
+      (m_metalog_entity->state.state & RangeState::RELINQUISH_LOG_INSTALLED)
+          == RangeState::RELINQUISH_LOG_INSTALLED) {
     CommitLogReaderPtr commit_log_reader =
       new CommitLogReader(Global::dfs, m_metalog_entity->state.transfer_log);
 
@@ -1305,21 +1309,24 @@ void Range::recovery_finalize() {
 
     commit_log_reader = 0;
 
-    m_transfer_log = new CommitLog(Global::dfs, m_metalog_entity->state.transfer_log,
+    m_transfer_log = new CommitLog(Global::dfs, 
+                                   m_metalog_entity->state.transfer_log,
                                    !m_metalog_entity->table.is_user());
 
     // re-initiate compaction
     for (size_t i=0; i<m_access_group_vector.size(); i++)
       m_access_group_vector[i]->stage_compaction();
 
-    if (m_metalog_entity->state.state == RangeState::SPLIT_LOG_INSTALLED) {
+    if ((m_metalog_entity->state.state & RangeState::SPLIT_LOG_INSTALLED)
+            == RangeState::SPLIT_LOG_INSTALLED) {
       HT_INFOF("Restored range state to SPLIT_LOG_INSTALLED (split point='%s' "
-               "xfer log='%s')", m_metalog_entity->state.split_point, m_metalog_entity->state.transfer_log);
+               "xfer log='%s')", m_metalog_entity->state.split_point,
+               m_metalog_entity->state.transfer_log);
       m_split_row = m_metalog_entity->state.split_point;
     }
     else
-      HT_INFOF("Restored range state to RELINQUISH_LOG_INSTALLED (xfer log='%s')",
-               m_metalog_entity->state.transfer_log);
+      HT_INFOF("Restored range state to RELINQUISH_LOG_INSTALLED (xfer "
+               "log='%s')", m_metalog_entity->state.transfer_log);
   }
 
   for (size_t i=0; i<m_access_group_vector.size(); i++)

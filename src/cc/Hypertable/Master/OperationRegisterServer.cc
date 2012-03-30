@@ -74,19 +74,40 @@ void OperationRegisterServer::execute() {
     if (!m_context->in_operation)
       balanced = true;
     m_rsc = new RangeServerConnection(m_context->mml_writer, m_location,
-                                      m_system_stats.net_info.host_name, m_public_addr,
-                                      balanced);
+        m_system_stats.net_info.host_name, m_public_addr,
+        balanced);
+  }
+
+  // this connection has been marked for removal
+  if (m_rsc->get_removed()) {
+    m_error = Error::MASTER_RANGESERVER_IN_RECOVERY;
+    m_error_msg = format("Detected RangeServer marked removed while registering server %s(%s), as location %s",
+        m_system_stats.net_info.host_name.c_str(), m_public_addr.format().c_str(),
+        m_location.c_str());
+    HT_ERROR_OUT << m_error_msg << HT_END;
+    CommHeader header;
+    header.initialize_from_request_header(m_event->header);
+    CommBufPtr cbp(new CommBuf(header, encoded_result_length()));
+
+    encode_result(cbp->get_data_ptr_address());
+    int error = m_context->comm->send_response(m_event->addr, cbp);
+    if (error != Error::OK)
+      HT_ERRORF("Problem sending response (location=%s) back to %s",
+                m_location.c_str(), m_event->addr.format().c_str());
   }
 
   m_context->connect_server(m_rsc, m_system_stats.net_info.host_name,
                             m_local_addr, m_public_addr);
-  int32_t difference = (int32_t)abs((m_received_ts - m_register_ts)/ 1000LL);
+  int32_t difference = (int32_t)abs((m_received_ts - m_register_ts) / 1000LL);
   if (difference > (3000000+m_context->max_allowable_skew)) {
     m_error = Error::RANGESERVER_CLOCK_SKEW;
-    m_error_msg = format("Detected clock skew while registering server %s(%s), as location %s register_ts=%llu, received_ts=%llu, difference=%d > allowable skew %d",
-        m_system_stats.net_info.host_name.c_str(), m_public_addr.format().c_str(),
-        m_location.c_str(), (Llu)m_register_ts, (Llu)m_received_ts, difference,
-        m_context->max_allowable_skew);
+    m_error_msg = format("Detected clock skew while registering server %s(%s), "
+            "as location %s register_ts=%llu, received_ts=%llu, difference=%d "
+            "> allowable skew %d", 
+            m_system_stats.net_info.host_name.c_str(), 
+            m_public_addr.format().c_str(), m_location.c_str(), 
+            (Llu)m_register_ts, (Llu)m_received_ts, difference, 
+            m_context->max_allowable_skew);
     HT_ERROR_OUT << m_error_msg << HT_END;
     // clock skew detected by master
     CommHeader header;
@@ -117,10 +138,39 @@ void OperationRegisterServer::execute() {
             m_location.c_str(), m_event->addr.format().c_str());
     }
   }
+
+  // wait till the RangeServer created a Hyperspace file (i.e.
+  // "/hyperspace/servers/rs1"), then register a callback which will fire if
+  // the file is unlocked
+  int timeout = 10000;
+  int waited = 0;
+  int step = 500;
+  while (waited < timeout) {
+    poll(0, 0, step);
+    waited += step;
+    try {
+      m_context->register_recovery_callback(m_rsc);
+    }
+    catch (Exception &e) {
+      // is this last loop? then fail with an error
+      if (waited + step > timeout) {
+        complete_error(e);
+        m_context->op->unblock(m_location);
+        m_context->op->unblock(Dependency::SERVERS);
+        m_context->op->unblock(Dependency::RECOVERY_BLOCKER);
+        return;
+      }
+      continue;
+    }
+    break;
+  }
+
   complete_ok_no_log();
   m_context->op->unblock(m_location);
   m_context->op->unblock(Dependency::SERVERS);
-  HT_INFOF("%lld Leaving RegisterServer %s", (Lld)header.id, m_rsc->location().c_str());
+  m_context->op->unblock(Dependency::RECOVERY_BLOCKER);
+  HT_INFOF("%lld Leaving RegisterServer %s", 
+          (Lld)header.id, m_rsc->location().c_str());
 }
 
 size_t OperationRegisterServer::encoded_result_length() const {

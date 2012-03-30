@@ -19,26 +19,28 @@
  * 02110-1301, USA.
  */
 
-#ifndef HYPERTABLE_METALOGDEFINITIONRANGESERVER_H
-#define HYPERTABLE_METALOGDEFINITIONRANGESERVER_H
+#ifndef HYPERTABLE_RESPONSECALLBACKACKNOWLEDGELOAD_H
+#define HYPERTABLE_RESPONSECALLBACKACKNOWLEDGELOAD_H
 
-#include "Common/ReferenceCount.h"
+#include "Common/Error.h"
 
-#include "Hypertable/Lib/MetaLogDefinition.h"
+#include <map>
+
+#include "AsyncComm/CommBuf.h"
+#include "AsyncComm/ResponseCallback.h"
+
+#include "Hypertable/Lib/Types.h"
 
 namespace Hypertable {
-  namespace MetaLog {
-    class DefinitionRangeServer : public Definition {
-    public:
-      DefinitionRangeServer(const char *backup_label) : Definition(backup_label) { }
-      virtual uint16_t version();
-      virtual bool supported_version(uint16_t ver);
-      virtual const char *name();
-      virtual Entity *create(uint16_t log_version, const EntityHeader &header);
-    };
-    typedef intrusive_ptr<DefinitionRangeServer> DefinitionRangeServerPtr;
-  }
+
+  class ResponseCallbackAcknowledgeLoad : public ResponseCallback {
+  public:
+    ResponseCallbackAcknowledgeLoad(Comm *comm, EventPtr &event_ptr)
+      : ResponseCallback(comm, event_ptr) { }
+
+    int response(const std::map<QualifiedRangeSpec, int> &error_map);
+  };
 
 }
 
-#endif // HYPERTABLE_METALOGDEFINITIONRANGESERVER_H
+#endif // HYPERTABLE_RESPONSECALLBACKACKNOWLEDGELOAD_H

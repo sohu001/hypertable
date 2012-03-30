@@ -31,6 +31,9 @@
 
 #include <boost/algorithm/string.hpp>
 
+#include "RangeServerConnection.h"
+#include "Context.h"
+
 extern "C" {
 #include <unistd.h>
 }
@@ -40,12 +43,10 @@ extern "C" {
 using namespace Hypertable;
 using namespace std;
 
-Monitoring::Monitoring(PropertiesPtr &props,NameIdMapperPtr &m_namemap) 
-  : m_last_server_count(0) {
-
-  /**
-   * Create dir for storing monitoring stats
-   */
+Monitoring::Monitoring(Context *context, PropertiesPtr &props,
+        NameIdMapperPtr &m_namemap) 
+  : m_context(context), m_last_server_count(0) {
+  /** Create directories for storing monitoring stats */
   m_monitoring_interval = props->get_i32("Hypertable.Monitoring.Interval");
   Path data_dir = props->get_str("Hypertable.DataDirectory");
   m_monitoring_dir = (data_dir /= "/run/monitoring").string();
@@ -62,14 +63,14 @@ Monitoring::Monitoring(PropertiesPtr &props,NameIdMapperPtr &m_namemap)
 }
 
 void Monitoring::create_dir(const String &dir) {
-    if (!FileUtils::exists(dir)) {
-      if (!FileUtils::mkdirs(dir)) {
-        HT_THROW(Error::LOCAL_IO_ERROR, "Unable to create monitoring dir "+dir);
-      }
-      HT_INFOF("Created monitoring dir %s",dir.c_str());
+  if (!FileUtils::exists(dir)) {
+    if (!FileUtils::mkdirs(dir)) {
+      HT_THROW(Error::LOCAL_IO_ERROR, "Unable to create monitoring dir "+dir);
     }
-    else
-      HT_INFOF("rangeservers monitoring stats dir %s exists ",dir.c_str());
+    HT_INFOF("Created monitoring dir %s",dir.c_str());
+  }
+  else
+    HT_INFOF("rangeservers monitoring stats dir %s exists ",dir.c_str());
 }
 
 void Monitoring::add_server(const String &location, StatsSystem &system_info) {
@@ -93,7 +94,7 @@ void Monitoring::drop_server(const String &location) {
 
   RangeServerMap::iterator iter = m_server_map.find(location);
   if (iter != m_server_map.end())
-    (*iter).second->dropped = true;
+    m_server_map.erase(iter);
 }
 
 namespace {
@@ -127,21 +128,28 @@ void Monitoring::add(std::vector<RangeServerStatistics> &stats) {
   m_table_stat_map.clear(); // clear the previous contents
 
   for (size_t i=0; i<stats.size(); i++) {
-
     memset(&rrd_data, 0, sizeof(rrd_data));
 
     iter = m_server_map.find(stats[i].location);
     if (iter == m_server_map.end()) {
-      HT_ERRORF("Statistics received for '%s' but not registered for Monitoring",
-                stats[i].location.c_str());
+      HT_ERRORF("Statistics received for '%s' but not registered for "
+              "Monitoring", stats[i].location.c_str());
       continue;
     }
 
     if (stats[i].fetch_error != Error::OK) {
-      (*iter).second->fetch_error = stats[i].fetch_error;
-      (*iter).second->fetch_error_msg = stats[i].fetch_error_msg;
       (*iter).second->fetch_timestamp = stats[i].fetch_timestamp;
-      continue;
+      (*iter).second->fetch_error = stats[i].fetch_error;
+      // if server is getting recovered: overwrite the error
+      RangeServerConnectionPtr rsc;
+      if (stats[i].fetch_error == Error::NO_RESPONSE
+          && m_context->find_server_by_location(stats[i].location, rsc)) {
+        if (rsc->is_recovering())
+          (*iter).second->fetch_error_msg = "Recovering...";
+        else
+          (*iter).second->fetch_error_msg = stats[i].fetch_error_msg;
+        continue;
+      }
     }
     else {
       server_count++;
@@ -668,8 +676,11 @@ void Monitoring::dump_rangeserver_summary_json(std::vector<RangeServerStatistics
 
     if (stats[i].fetch_error == 0)
       error_str = "ok";
-    else
-      error_str = Error::get_text(stats[i].fetch_error);
+    else {
+      error_str = stats[i].fetch_error_msg;
+      if (error_str.empty())
+        error_str = Error::get_text(stats[i].fetch_error);
+    }
 
     entry = format(rs_entry_format,
                    i,

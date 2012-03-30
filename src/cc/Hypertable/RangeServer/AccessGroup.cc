@@ -147,6 +147,10 @@ void AccessGroup::add(const Key &key, const ByteString value) {
   }
   else if (!m_recovering) {
     HT_ERROR("Revision (clock) skew detected! May result in data loss.");
+    //HT_DEBUG_OUT << "skew detected for key=" << key.row
+    //    << " key.revision=" << key.revision << " latest_stored_revision="
+    //    << m_latest_stored_revision << " earliest_cached_revision="
+    //    << m_earliest_cached_revision << HT_END;
     if (m_schema->column_is_counter(key.column_family_code))
       return m_cell_cache_manager->add_counter(key, value);
     else
@@ -672,9 +676,12 @@ void AccessGroup::run_compaction(int maintenance_flags) {
 
         m_latest_stored_revision = boost::any_cast<int64_t>
           (cellstore->get_trailer()->get("revision"));
-        if (m_latest_stored_revision >= m_earliest_cached_revision)
+        if (m_latest_stored_revision >= m_earliest_cached_revision) {
           HT_ERROR("Revision (clock) skew detected! May result in data loss.");
-
+          HT_DEBUG_OUT << "Revision (clock) skew detected! May result in data"
+              << " loss in AG for range " << m_range_name
+              << " " << std::hex << this << HT_END;
+        }
         if (m_in_memory) {
           m_cell_cache_manager->install_new_immutable_cache(filtered_cache);
           merge_caches(false);

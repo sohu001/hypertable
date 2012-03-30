@@ -34,6 +34,7 @@ Operation.cc
 OperationAlterTable.cc
 OperationBalance.cc
 OperationCollectGarbage.cc
+OperationRecoveryBlocker.cc
 OperationCreateNamespace.cc
 OperationCreateTable.cc
 OperationDropNamespace.cc
@@ -43,6 +44,7 @@ OperationInitialize.cc
 OperationMoveRange.cc
 OperationProcessor.cc
 OperationRecoverServer.cc
+OperationRecoverServerRanges.cc
 OperationRegisterServer.cc
 OperationRelinquishAcknowledge.cc
 OperationRenameTable.cc

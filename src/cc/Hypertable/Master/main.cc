@@ -114,7 +114,8 @@ int main(int argc, char **argv) {
     context->dfs = new DfsBroker::Client(context->conn_manager, context->props);
     context->mml_definition =
         new MetaLog::DefinitionMaster(context, format("%s_%u", "master", port).c_str());
-    context->monitoring = new Monitoring(properties, context->namemap);
+    context->monitoring = new Monitoring(&(*context), properties, 
+            context->namemap);
     context->request_timeout = (time_t)(context->props->get_i32("Hypertable.Request.Timeout") / 1000);
 
     if (get_bool("Hypertable.Master.Locations.IncludeMasterHash")) {
@@ -145,9 +146,11 @@ int main(int argc, char **argv) {
      */
     std::vector<MetaLog::EntityPtr> entities;
     std::vector<OperationPtr> operations;
+    std::map<String, OperationPtr> recovery_operations;
     MetaLog::ReaderPtr mml_reader;
     OperationPtr operation;
     RangeServerConnectionPtr rsc;
+    StringSet locations;
     String log_dir = context->toplevel_dir + "/servers/master/log/" + context->mml_definition->name();
 
     mml_reader = new MetaLog::Reader(context->dfs, context->mml_definition, log_dir);
@@ -182,17 +185,34 @@ int main(int argc, char **argv) {
           // there should be only one OPERATION_BALANCE
           HT_ASSERT(context->op_balance == NULL);
           context->op_balance = dynamic_cast<OperationBalance *>(operation.get());
+          operations.push_back(operation);
         }
-        operations.push_back(operation);
+        // master was interrupted in the middle of rangeserver failover
+        else if (dynamic_cast<OperationRecoverServer *>(operation.get())) {
+          HT_INFO("Recovery was interrupted; continuing");
+          OperationRecoverServer *op = dynamic_cast<OperationRecoverServer *>(operation.get());
+          recovery_operations[op->location()] = operation;
+        }
+        else
+          operations.push_back(operation);
       }
       else {
         rsc = dynamic_cast<RangeServerConnection *>(entities[i].get());
         rsc->set_mml_writer(context->mml_writer);
         context->add_server(rsc);
         HT_ASSERT(rsc);
-        operations.push_back( new OperationRecoverServer(context, rsc) );
+        locations.insert(rsc->location());
+        if (recovery_operations.find(rsc->location()) == recovery_operations.end())
+          recovery_operations[rsc->location()] = new OperationRecoverServer(context, rsc);
       }
     }
+    std::map<String, OperationPtr>::iterator recovery_it = recovery_operations.begin();
+    while(recovery_it != recovery_operations.end()) {
+      operations.push_back(recovery_it->second);
+      ++recovery_it;
+    }
+    recovery_operations.clear();
+
     if (operations.empty()) {
       OperationInitializePtr init_op = new OperationInitialize(context);
       if (context->namemap->exists_mapping("/sys/METADATA", 0))
@@ -226,9 +246,7 @@ int main(int argc, char **argv) {
 
     ConnectionHandlerFactoryPtr hf(new HandlerFactory(context));
     InetAddr listen_addr(INADDR_ANY, port);
-
     context->comm->listen(listen_addr, hf);
-
     context->op->join();
     context->comm->close_socket(listen_addr);
 

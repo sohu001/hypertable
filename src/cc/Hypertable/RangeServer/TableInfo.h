@@ -85,7 +85,6 @@ namespace Hypertable {
               SchemaPtr &schema);
 
     virtual ~TableInfo() {
-      HT_INFOF("%p: destructor", (void *)this);
     }
 
     virtual bool remove(const String &start_row, const String &end_row);

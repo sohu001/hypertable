@@ -56,8 +56,6 @@ void MetadataNormal::reset_files_scan() {
   RowInterval ri;
   Cell cell;
 
-  m_ag_map.clear();
-
   scan_spec.row_limit = 1;
   scan_spec.max_versions = 1;
   ri.start = m_metadata_key.c_str();
@@ -68,6 +66,8 @@ void MetadataNormal::reset_files_scan() {
   scan_spec.columns.push_back("NextCSID");
 
   TableScannerPtr files_scanner = Global::metadata_table->create_scanner(scan_spec);
+
+  m_ag_map.clear();
 
   String ag_name;
 
