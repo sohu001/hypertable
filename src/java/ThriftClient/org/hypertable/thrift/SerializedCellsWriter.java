@@ -134,6 +134,10 @@ public class SerializedCellsWriter {
       length += 8;
     }
 
+    // make room for version number
+    if (mBuffer.position() == 0)
+      length += 4;
+
     // need to leave room for the termination byte
     if (length >= mBuffer.remaining()) {
       if (mBuffer.position() > 0) {
@@ -154,6 +158,9 @@ public class SerializedCellsWriter {
       }
     }
 
+    if (mBuffer.position() == 0)
+	mBuffer.putInt(SerializedCellsFlag.VERSION);
+
     // control byte
     mBuffer.put(control);
 
@@ -165,8 +172,17 @@ public class SerializedCellsWriter {
         (control & SerializedCellsFlag.REV_IS_TS) == 0)
       mBuffer.putLong((long)0);
 
-    // row
-    mBuffer.put(row, row_offset, row_length);
+    // row (add only if different from the previous)
+    if (!(row_length == mSavedRowLength && row_offset == mSavedRowOffset && row == mSavedRowArray)) {
+      String str = new String(row, row_offset, row_length);
+      if (!mSavedRow.equals(str)) {
+        mSavedRow = str;
+	mSavedRowArray = row;
+	mSavedRowOffset = row_offset;
+	mSavedRowLength = row_length;
+	mBuffer.put(row, row_offset, row_length);
+      }
+    }
     mBuffer.put((byte)0);
 
     // column family
@@ -240,6 +256,10 @@ public class SerializedCellsWriter {
   public void clear() {
     mBuffer.clear();
     mFinalized = false;
+    mSavedRow = "";
+    mSavedRowArray = null;
+    mSavedRowOffset = 0;
+    mSavedRowLength = 0;
   }
 
   public int capacity() {
@@ -247,6 +267,10 @@ public class SerializedCellsWriter {
   }
 
   private ByteBuffer mBuffer;
+  private String mSavedRow = "";
+  private byte [] mSavedRowArray = null;
+  private int mSavedRowOffset = 0;
+  private int mSavedRowLength = 0;
   private boolean mFinalized = false;
   private boolean mGrow = false;
 }
